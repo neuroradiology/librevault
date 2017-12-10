@@ -27,33 +27,35 @@
  * files in the program, then also delete it here.
  */
 #pragma once
-#include "util/log.h"
-#include <librevault/Meta.h>
-#include <librevault/util/conv_bitfield.h>
+#include "MetaInfo.h"
+#include "v2/messages.h"
+#include <QBitArray>
 #include <QObject>
-#include <set>
 
 namespace librevault {
 
-class RemoteFolder;
-class MetaStorage;
+class Peer;
+class Index;
 class ChunkStorage;
 
 class MetaUploader : public QObject {
-	Q_OBJECT
-	LOG_SCOPE("MetaUploader");
-public:
-	MetaUploader(MetaStorage* meta_storage, ChunkStorage* chunk_storage, QObject* parent);
+  Q_OBJECT
 
-	void broadcast_meta(QList<RemoteFolder*> remotes, const Meta::PathRevision& revision, const bitfield_type& bitfield);
+ public:
+  MetaUploader(Index* index, ChunkStorage* chunk_storage, QObject* parent);
 
-	/* Message handlers */
-	void handle_handshake(RemoteFolder* remote);
-	void handle_meta_request(RemoteFolder* remote, const Meta::PathRevision& revision);
+  Q_SLOT void broadcastMeta(const QList<Peer*>& peers, const SignedMeta& smeta);
+  Q_SLOT void broadcastChunk(const QList<Peer*>& peers, const QByteArray& ct_hash);
 
-private:
-	MetaStorage* meta_storage_;
-	ChunkStorage* chunk_storage_;
+  /* Message handlers */
+  Q_SLOT void handleHandshake(Peer* peer);
+  Q_SLOT void handleMetaRequest(Peer* peer, const MetaInfo::PathRevision& revision);
+
+ private:
+  Index* index_;
+  ChunkStorage* chunk_storage_;
+
+  protocol::v2::Message makeMessage(const SignedMeta& smeta);
 };
 
 } /* namespace librevault */

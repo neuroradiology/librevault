@@ -29,33 +29,50 @@
 #include "MetaDownloader.h"
 #include "Downloader.h"
 #include "folder/FolderGroup.h"
-#include "folder/RemoteFolder.h"
-#include "folder/meta/MetaStorage.h"
+#include "folder/storage/AddDownloadedTask.h"
+#include "folder/storage/Index.h"
+#include "folder/storage/MetaTaskScheduler.h"
+#include "p2p/Peer.h"
 
 namespace librevault {
 
-MetaDownloader::MetaDownloader(MetaStorage* meta_storage, Downloader* downloader, QObject* parent) :
-	QObject(parent),
-	meta_storage_(meta_storage),
-	downloader_(downloader) {
-	LOGFUNC();
+Q_LOGGING_CATEGORY(log_metadownloader, "folder.transfer.metadownloader")
+
+MetaDownloader::MetaDownloader(const models::FolderSettings& params, Index* index, Downloader* downloader,
+    MetaTaskScheduler* task_scheduler, QObject* parent)
+    : QObject(parent),
+      params_(params),
+      index_(index),
+      downloader_(downloader),
+      task_scheduler_(task_scheduler) {}
+
+void MetaDownloader::handleIndexUpdate(
+    Peer* peer, const MetaInfo::PathRevision& revision, QBitArray bitfield) {
+  if (index_->haveMeta(revision))
+    downloader_->notifyRemoteMeta(peer, revision, bitfield);
+  else if (index_->putAllowed(revision)) {
+    protocol::v2::Message request;
+    request.header.type = protocol::v2::MessageType::METAREQUEST;
+    request.metarequest.revision = revision;
+    peer->send(request);
+  } else
+    qCDebug(log_metadownloader) << "Remote node notified us about an expired Meta";
 }
 
-void MetaDownloader::handle_have_meta(RemoteFolder* origin, const Meta::PathRevision& revision, const bitfield_type& bitfield) {
-	if(meta_storage_->haveMeta(revision))
-		downloader_->notifyRemoteMeta(origin, revision, bitfield);
-	else if(meta_storage_->putAllowed(revision))
-		origin->request_meta(revision);
-	else
-		LOGD("Remote node notified us about an expired Meta");
+void MetaDownloader::handleMetaReply(Peer* peer, const SignedMeta& smeta, QBitArray bitfield) {
+  try {
+    if (!smeta.isValid(params_.secret)) throw InvalidSignature();
+    if (!index_->putAllowed(smeta.metaInfo().path_revision())) throw OldMeta();
+
+    auto id = smeta.metaInfo().path_revision();
+
+    QueuedTask* task = new AddDownloadedTask(smeta, index_, this);
+    connect(task, &QObject::destroyed, this,
+        [=] { downloader_->notifyRemoteMeta(peer, id, bitfield); });
+    task_scheduler_->scheduleTask(task);
+  } catch (const CantDownload& e) {
+    qCDebug(log_metadownloader) << e.what();
+  }
 }
 
-void MetaDownloader::handle_meta_reply(RemoteFolder* origin, const SignedMeta& smeta, const bitfield_type& bitfield) {
-	if(meta_storage_->putAllowed(smeta.meta().path_revision())) {
-		meta_storage_->putMeta(smeta);
-		downloader_->notifyRemoteMeta(origin, smeta.meta().path_revision(), bitfield);
-	}else
-		LOGD("Remote node posted to us about an expired Meta");
-}
-
-} /* namespace librevault */
+}  // namespace librevault

@@ -27,52 +27,56 @@
  * files in the program, then also delete it here.
  */
 #include "Uploader.h"
-#include "folder/chunk/ChunkStorage.h"
-#include "folder/RemoteFolder.h"
+#include "folder/storage/ChunkStorage.h"
+#include "p2p/Peer.h"
+#include <QHash>
+#include <QLoggingCategory>
 
 namespace librevault {
 
-Uploader::Uploader(ChunkStorage* chunk_storage, QObject* parent) :
-	QObject(parent),
-	chunk_storage_(chunk_storage) {
-	LOGFUNC();
+Q_LOGGING_CATEGORY(log_uploader, "folder.transfer.uploader")
+
+Uploader::Uploader(ChunkStorage* chunk_storage, QObject* parent)
+    : QObject(parent), chunk_storage_(chunk_storage) {}
+
+void Uploader::handleInterested(Peer* peer) {
+  // TODO: write good choking algorithm.
+  all_interested_.insert(peer, peer->getUnchokeGuard());
+}
+void Uploader::handleNotInterested(Peer* peer) {
+  // TODO: write good choking algorithm.
+  all_interested_.remove(peer);
 }
 
-void Uploader::broadcast_chunk(QList<RemoteFolder*> remotes, const blob& ct_hash) {
-	for(auto& remote : remotes) {
-		remote->post_have_chunk(ct_hash);
-	}
+void Uploader::untrackPeer(Peer* peer) { all_interested_.remove(peer); }
+
+void Uploader::handleBlockRequest(
+    Peer* peer, const QByteArray& ct_hash, quint32 offset, quint32 size) noexcept {
+  try {
+    if (peer->amChoking() || !peer->peerInterested()) throw ChokeMismatch();
+
+    protocol::v2::Message response;
+    response.header.type = protocol::v2::MessageType::BLOCKRESPONSE;
+    response.blockresponse.offset = offset;
+    response.blockresponse.ct_hash = ct_hash;
+    response.blockresponse.content = getBlock(ct_hash, offset, size);
+    peer->send(response);
+  } catch (const ChunkStorage::NoSuchChunk& e) {
+    qCDebug(log_uploader) << "Requested nonexistent block";
+  } catch (const BlockOutOfBounds& e) {
+    qCDebug(log_uploader) << e.what();
+  } catch (const ChokeMismatch& e) {
+    qCDebug(log_uploader) << e.what();
+  }
 }
 
-void Uploader::handle_interested(RemoteFolder* remote) {
-	LOGFUNC();
+QByteArray Uploader::getBlock(const QByteArray& ct_hash, quint32 offset, quint32 size) {
+  auto chunk = chunk_storage_->getChunk(ct_hash);  // throws ChunkStorage::NoSuchChunk
 
-	// TODO: write good choking algorithm.
-	remote->unchoke();
-}
-void Uploader::handle_not_interested(RemoteFolder* remote) {
-	LOGFUNC();
+  if ((int)offset >= chunk.size() || (int)size > (chunk.size() - (int)offset))
+    throw BlockOutOfBounds();
 
-	// TODO: write good choking algorithm.
-	remote->choke();
-}
-
-void Uploader::handle_block_request(RemoteFolder* remote, const blob& ct_hash, uint32_t offset, uint32_t size) noexcept {
-	try {
-		if(!remote->am_choking() && remote->peer_interested()) {
-			remote->post_block(ct_hash, offset, get_block(ct_hash, offset, size));
-		}
-	}catch(ChunkStorage::no_such_chunk& e){
-		LOGW("Requested nonexistent block");
-	}
-}
-
-blob Uploader::get_block(const blob& ct_hash, uint32_t offset, uint32_t size) {
-	auto chunk = chunk_storage_->get_chunk(ct_hash);
-	if((int)offset < chunk.size() && (int)size <= chunk.size()-(int)offset)
-		return blob(chunk.begin()+offset, chunk.begin()+offset+size);
-	else
-		throw ChunkStorage::no_such_chunk();
+  return chunk.mid(offset, size);
 }
 
 } /* namespace librevault */

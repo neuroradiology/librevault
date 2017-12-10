@@ -27,33 +27,33 @@
  * files in the program, then also delete it here.
  */
 #pragma once
+
+#include "config/FolderSettings_fwd.h"
 #include <QDateTime>
-#include <QReadWriteLock>
+#include <QObject>
+#include <QMutex>
 #include <QStringList>
 
 namespace librevault {
 
-class FolderParams;
-class PathNormalizer;
+class IgnoreList : public QObject {
+  Q_OBJECT
+ public:
+  IgnoreList(const models::FolderSettings& params, QObject* parent);
 
-class IgnoreList {
-public:
-	IgnoreList(const FolderParams& params, PathNormalizer& path_normalizer);
+  bool isIgnored(const QByteArray& normpath);
 
-	bool isIgnored(QByteArray normpath);
+ private:
+  const models::FolderSettings& params_;
+  QStringList filters_wildcard_;
 
-private:
-	const FolderParams& params_;
-	PathNormalizer& path_normalizer_;
-	QStringList filters_wildcard_;
+  QMutex ignorelist_mtx;
+  QDateTime last_rebuild_;
 
-	QReadWriteLock ignorelist_mtx;
-	QDateTime last_rebuild_;
-
-	void lazyRebuildIgnores();
-	void rebuildIgnores();  // not thread-safe!
-	void parseLine(QString prefix, QString line);
-	void addIgnorePattern(QString pattern, bool can_be_dir = true);
+  void lazyRebuildIgnores();
+  void rebuildIgnores();  // not thread-safe!
+  void parseLine(QString prefix, QString line);
+  void addIgnorePattern(QString pattern, bool can_be_dir = true);
 };
 
 } /* namespace librevault */

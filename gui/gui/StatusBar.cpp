@@ -31,7 +31,7 @@
 #include "control/RemoteConfig.h"
 #include "control/RemoteState.h"
 #include "icons/GUIIconProvider.h"
-#include "human_size.h"
+#include "util/human_size.h"
 #include <QtWidgets/QMenu>
 
 StatusBar::StatusBar(QStatusBar* bar, Daemon* daemon) : QObject(bar), bar_(bar), daemon_(daemon) {
@@ -69,7 +69,7 @@ StatusBar::~StatusBar() {}
 
 void StatusBar::refresh() {
 	/* Refresh DHT */
-	if(daemon_->config()->getGlobal("mainline_dht_enabled").toBool()) {
+	if(daemon_->config()->getGlobals()["mainline_dht_enabled"].toBool()) {
 		dht_label_->setText(tr("DHT: %n nodes", "DHT", daemon_->state()->getGlobalValue("dht_nodes_count").toInt()));
 	}else{
 		dht_label_->setText(tr("DHT: disabled", "DHT"));
@@ -98,8 +98,8 @@ QFrame* StatusBar::create_separator() const {
 }
 
 void StatusBar::refreshBandwidth(float up_bandwidth, float down_bandwidth, double up_bytes, double down_bytes) {
-	up_label_->setText(QStringLiteral("\u2191 %1 (%2)").arg(human_bandwidth(up_bandwidth)).arg(human_size(up_bytes)));
-	down_label_->setText(QStringLiteral("\u2193 %1 (%2)").arg(human_bandwidth(down_bandwidth)).arg(human_size(down_bytes)));
+	up_label_->setText(QStringLiteral("\u2191 %1 (%2)").arg(humanBandwidth(up_bandwidth)).arg(humanSize(up_bytes)));
+	down_label_->setText(QStringLiteral("\u2193 %1 (%2)").arg(humanBandwidth(down_bandwidth)).arg(humanSize(down_bytes)));
 }
 
 void StatusBar::showDHTMenu(const QPoint& pos) {
@@ -107,7 +107,7 @@ void StatusBar::showDHTMenu(const QPoint& pos) {
 
 	QAction dht_enabled(tr("Enable DHT"), bar_);
 	dht_enabled.setCheckable(true);
-	dht_enabled.setChecked(daemon_->config()->getGlobal("mainline_dht_enabled").toBool());
+	dht_enabled.setChecked(daemon_->config()->getGlobals()["mainline_dht_enabled"].toBool());
 	connect(&dht_enabled, &QAction::toggled, [this](bool checked){daemon_->config()->setGlobal("mainline_dht_enabled", checked);});
 	context_menu.addAction(&dht_enabled);
 

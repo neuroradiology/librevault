@@ -28,11 +28,12 @@
  */
 #pragma once
 #include "downloader/ChunkFileBuilder.h"
+#include "downloader/RequestTracker.h"
 #include "downloader/WeightedChunkQueue.h"
-#include "folder/RemoteFolder.h"
+#include "p2p/Peer.h"
+#include "config/FolderSettings_fwd.h"
 #include "util/AvailabilityMap.h"
-#include "blob.h"
-#include "util/log.h"
+#include <QBitArray>
 #include <QList>
 #include <QTimer>
 #include <boost/bimap.hpp>
@@ -46,79 +47,69 @@
 
 namespace librevault {
 
-class FolderParams;
-class MetaStorage;
+class Index;
 class ChunkStorage;
 
 struct DownloadChunk : boost::noncopyable {
-	DownloadChunk(const FolderParams& params, QByteArray ct_hash, quint32 size);
+  DownloadChunk(const models::FolderSettings& params, const QByteArray& ct_hash, quint32 size);
 
-	ChunkFileBuilder builder;
-
-	AvailabilityMap<uint32_t> requestMap();
-
-	/* Request-oriented functions */
-	struct BlockRequest {
-		uint32_t offset;
-		uint32_t size;
-		std::chrono::steady_clock::time_point started;
-	};
-	QMultiHash<RemoteFolder*, BlockRequest> requests;
-	QHash<RemoteFolder*, std::shared_ptr<RemoteFolder::InterestGuard>> owned_by;
-
-	const QByteArray ct_hash;
+  ChunkFileBuilder builder;
+  QHash<Peer*, std::shared_ptr<StateGuard>> owned_by;
+  const QByteArray ct_hash;
 };
-
 using DownloadChunkPtr = std::shared_ptr<DownloadChunk>;
 
 class Downloader : public QObject {
-	Q_OBJECT
-signals:
-	void chunkDownloaded(QByteArray ct_hash, QFile* chunk_f);
+  Q_OBJECT
 
-public:
-	Downloader(const FolderParams& params, MetaStorage* meta_storage, QObject* parent);
-	~Downloader();
+ signals:
+  void chunkDownloaded(QByteArray ct_hash, QFile* chunk_f);
 
-public slots:
-	void notifyLocalMeta(const SignedMeta& smeta, const bitfield_type& bitfield);
-	void notifyLocalChunk(const blob& ct_hash);
+ public:
+  DECLARE_EXCEPTION(InconsistentMetaBetweenPeers, "Meta is different between nodes");
 
-	void notifyRemoteMeta(RemoteFolder* remote, const Meta::PathRevision& revision, bitfield_type bitfield);
-	void notifyRemoteChunk(RemoteFolder* remote, const blob& ct_hash);
+  Downloader(const models::FolderSettings& params, Index* index, QObject* parent);
 
-	void handleChoke(RemoteFolder* remote);
-	void handleUnchoke(RemoteFolder* remote);
+ public slots:
+  void notifyLocalMeta(const SignedMeta& smeta, const QBitArray& bitfield);
+  void notifyLocalChunk(const QByteArray& ct_hash);
 
-	void putBlock(const blob& ct_hash, uint32_t offset, const blob& data, RemoteFolder* from);
+  void notifyRemoteMeta(
+      Peer* peer, const MetaInfo::PathRevision& revision, const QBitArray& bitfield);
+  void notifyRemoteChunk(Peer* peer, const QByteArray& ct_hash);
 
-	void trackRemote(RemoteFolder* remote);
-	void untrackRemote(RemoteFolder* remote);
+  void handleChoke(Peer* peer);
+  void handleUnchoke(Peer* remote);
 
-private:
-	const FolderParams& params_;
-	MetaStorage* meta_storage_;
+  void putBlock(const QByteArray& ct_hash, uint32_t offset, const QByteArray& data, Peer* from);
 
-	QHash<QByteArray, DownloadChunkPtr> down_chunks_;
-	WeightedChunkQueue download_queue_;
+  void trackPeer(Peer* peer);
+  void untrackPeer(Peer* peer);
 
-	size_t countRequests() const;
+ private:
+  const models::FolderSettings& params_;
+  Index* index_;
 
-	/* Request process */
-	QTimer* maintain_timer_;
+  QHash<QByteArray, DownloadChunkPtr> down_chunks_;
+  WeightedChunkQueue download_queue_;
 
-	void maintainRequests();
-	bool requestOne();
-	RemoteFolder* nodeForRequest(QByteArray ct_hash);
+  RequestTracker request_tracker_;
 
-	void addChunk(QByteArray ct_hash, quint32 size);
-	void removeChunk(QByteArray ct_hash);
+  /* Request process */
+  QTimer* maintain_timer_;
 
-	/* Node management */
-	QSet<RemoteFolder*> remotes_;
+  void maintainRequests();
+  bool requestOne();
+  Peer* peerForRequest(const QByteArray& ct_hash);
 
-	QSet<QByteArray> getCluster(QByteArray ct_hash);
-	QSet<QByteArray> getMetaCluster(QList<QByteArray> ct_hashes);
+  void addChunk(const QByteArray& ct_hash, quint32 size);
+  void removeChunk(const QByteArray& ct_hash);
+
+  /* Node management */
+  QSet<Peer*> peers_;
+
+  QSet<QByteArray> getCluster(const QByteArray& ct_hash);
+  QSet<QByteArray> getMetaCluster(const QList<QByteArray>& ct_hashes);
 };
 
-} /* namespace librevault */
+}  // namespace librevault

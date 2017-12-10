@@ -36,7 +36,7 @@
 #include <QFileIconProvider>
 #include <QJsonArray>
 #include <QClipboard>
-#include "human_size.h"
+#include "util/human_size.h"
 
 FolderProperties::FolderProperties(QByteArray folderid, Daemon* daemon, FolderModel* folder_model, QWidget* parent) :
 		QDialog(parent), daemon_(daemon), folder_model_(folder_model), folderid_(folderid) {
@@ -52,7 +52,7 @@ FolderProperties::FolderProperties(QByteArray folderid, Daemon* daemon, FolderMo
 #endif
 
 	ui.folder_icon->setPixmap(QFileIconProvider().icon(QFileIconProvider::Folder).pixmap(32, 32));
-	ui.folder_name->setText(daemon_->config()->getFolderValue(folderid_, "path").toString());
+	ui.folder_name->setText(daemon_->config()->getFolder(folderid_).value("path").toString());
 
 	init_secrets();
 
@@ -76,25 +76,25 @@ FolderProperties::FolderProperties(QByteArray folderid, Daemon* daemon, FolderMo
 FolderProperties::~FolderProperties() {}
 
 void FolderProperties::init_secrets() {
-	librevault::Secret secret = daemon_->config()->getFolderValue(folderid_, "secret").toString().toStdString();
+	librevault::Secret secret = librevault::Secret(daemon_->config()->getFolder(folderid_).value("secret").toString());
 
-	if(secret.get_type() <= secret.ReadWrite)
-		ui.secret_rw->setText(QString::fromStdString(secret.string()));
+	if(secret.level() <= secret.ReadWrite)
+		ui.secret_rw->setText(secret);
 	else {
 		ui.label_rw->setVisible(false);
 		ui.secret_rw->setVisible(false);
 		ui.copy_rw->setVisible(false);
 	}
 
-	if(secret.get_type() <= secret.ReadOnly)
-		ui.secret_ro->setText(QString::fromStdString(secret.derive(secret.ReadOnly).string()));
+	if(secret.level() <= secret.ReadOnly)
+		ui.secret_ro->setText(secret.derive(secret.ReadOnly));
 	else {
 		ui.label_ro->setVisible(false);
 		ui.secret_ro->setVisible(false);
 		ui.copy_ro->setVisible(false);
 	}
 
-	ui.secret_do->setText(QString::fromStdString(secret.derive(secret.Download).string()));
+	ui.secret_do->setText(secret.derive(secret.Download));
 }
 
 void FolderProperties::refresh() {

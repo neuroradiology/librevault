@@ -30,37 +30,62 @@
 
 #define EXIT_RESTART 451
 
+#include "util/BandwidthCounter.h"
+#include "config/FolderSettings_fwd.h"
 #include <QCoreApplication>
-#include <memory>
+#include <QMap>
 
 namespace librevault {
 
 /* Components */
-class ControlServer;
-class Discovery;
-class FolderService;
 class NodeKey;
-class P2PProvider;
-class PortMappingService;
-class StateCollector;
+class PeerServer;
+class GenericNatService;
+
+class FolderGroup;
+
+class BandwidthCounter;
+
+class BTProvider;
+class DHTProvider;
+class MulticastProvider;
+
+class Webserver;
 
 class Client : public QCoreApplication {
-	Q_OBJECT
-public:
-	Client(int argc, char** argv);
-	virtual ~Client();
+  Q_OBJECT
+ public:
+  Client(int argc, char** argv);
+  virtual ~Client();
 
-	int run();
-	void restart();
-	void shutdown();
-private:
-	StateCollector* state_collector_;
-	NodeKey* node_key_;
-	PortMappingService* portmanager_;
-	Discovery* discovery_;
-	FolderService* folder_service_;
-	P2PProvider* p2p_provider_;
-	ControlServer* control_server_;
+ public slots:
+  void restart();
+  void shutdown();
+
+ private:
+  BandwidthCounter bc_all_, bc_blocks_;
+  NodeKey* node_key_;
+  GenericNatService* portmanager_;
+  PeerServer* peerserver_;
+
+  BTProvider* bt_;
+  DHTProvider* dht_;
+  MulticastProvider* mcast_;
+
+  Webserver* webserver_;
+
+  // Folders
+  QMap<QByteArray, FolderGroup*> groups_;
+
+ private slots:
+  void initDiscovery();
+  void deinitDiscovery();
+
+  void initFolder(const models::FolderSettings& params);
+  void deinitFolder(const QByteArray& folderid);
+
+  void initializeAll();
+  void deinitializeAll();
 };
 
 } /* namespace librevault */

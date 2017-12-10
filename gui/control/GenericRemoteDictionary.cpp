@@ -28,7 +28,7 @@
  */
 #include "GenericRemoteDictionary.h"
 #include "Daemon.h"
-#include <librevault/Secret.h>
+#include "secret/Secret.h"
 #include <QNetworkReply>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -93,8 +93,8 @@ void GenericRemoteDictionary::renew() {
 			for(auto folder : folders_array) {
 				QJsonObject folder_object = folder.toObject();
 
-				librevault::Secret secret(folder_object["secret"].toString().toStdString());
-				QByteArray folderid((const char*)secret.get_Hash().data(), secret.get_Hash().size());
+				librevault::Secret secret(folder_object["secret"].toString());
+				QByteArray folderid = secret.folderid();
 
 				folder_cache_[folderid] = folder_object;
 			}

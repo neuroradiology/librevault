@@ -28,74 +28,133 @@
  */
 #include "Client.h"
 #include "control/Config.h"
-#include "control/server/ControlServer.h"
-#include "control/StateCollector.h"
-#include "discovery/Discovery.h"
 #include "folder/FolderGroup.h"
-#include "folder/FolderService.h"
-#include "nat/PortMappingService.h"
 #include "nodekey/NodeKey.h"
-#include "p2p/P2PProvider.h"
+#include "p2p/PeerPool.h"
+#include "p2p/PeerServer.h"
+#include <NatPmpService.h>
+#include <discovery/bt/BTProvider.h>
+#include <discovery/dht/DHTProvider.h>
+#include <discovery/multicast/MulticastProvider.h>
+#include "webserver/Webserver.h"
 
 namespace librevault {
 
+Q_LOGGING_CATEGORY(log_client, "client")
+
 Client::Client(int argc, char** argv) : QCoreApplication(argc, argv) {
-	setApplicationName("Librevault");
-	setOrganizationDomain("librevault.com");
+  qRegisterMetaType<SignedMeta>("SignedMeta");
 
-	// Initializing components
-	state_collector_ = new StateCollector(this);
-	node_key_ = new NodeKey(this);
-	portmanager_ = new PortMappingService(this);
-	discovery_ = new Discovery(node_key_, portmanager_, state_collector_, this);
-	folder_service_ = new FolderService(state_collector_, this);
-	p2p_provider_ = new P2PProvider(node_key_, portmanager_, folder_service_, this);
-	control_server_ = new ControlServer(state_collector_, this);
+  // Initializing components
+  node_key_ = new NodeKey(this);
+  portmanager_ = new NatPmpService(this);
+  peerserver_ = new PeerServer(node_key_, portmanager_, this);
 
-	/* Connecting signals */
-	connect(state_collector_, &StateCollector::globalStateChanged, control_server_, &ControlServer::notify_global_state_changed);
-	connect(state_collector_, &StateCollector::folderStateChanged, control_server_, &ControlServer::notify_folder_state_changed);
+  webserver_ = new Webserver(this);
 
-	connect(discovery_, &Discovery::discovered, p2p_provider_, &P2PProvider::handleDiscovered);
+  portmanager_->setEnabled(true);
 
-	connect(folder_service_, &FolderService::folderAdded, control_server_, [this](FolderGroup* group){
-		control_server_->notify_folder_added(group->folderid(), Config::get()->getFolder(group->folderid()));
-	});
-	connect(folder_service_, &FolderService::folderRemoved, control_server_, [this](FolderGroup* group){
-		control_server_->notify_folder_removed(group->folderid());
-	});
+  /* Connecting signals */
+  connect(Config::get(), &Config::folderAdded, this, &Client::initFolder);
+  connect(Config::get(), &Config::folderRemoved, this, &Client::deinitFolder);
 
-	connect(folder_service_, &FolderService::folderAdded, discovery_, &Discovery::addGroup);
-
-	connect(control_server_, &ControlServer::restart, this, &Client::restart);
-	connect(control_server_, &ControlServer::shutdown, this, &Client::shutdown);
+  QTimer::singleShot(0, this, &Client::initializeAll);
 }
 
 Client::~Client() {
-	delete control_server_;
-	delete p2p_provider_;
-	delete folder_service_;
-	delete discovery_;
-	delete portmanager_;
-	delete node_key_;
-	delete state_collector_;
+  delete webserver_;
+  delete peerserver_;
+  delete portmanager_;
+  delete node_key_;
 }
 
-int Client::run() {
-	folder_service_->run();
-	control_server_->run();
+void Client::initializeAll() {
+  peerserver_->start();
 
-	return this->exec();
+  initDiscovery();
+
+  webserver_->start();
+
+  // Initialize all existing folders
+  for (const QByteArray& folderid : Config::get()->listFolders())
+    initFolder(Config::get()->getFolder(folderid));
+}
+
+void Client::deinitializeAll() {
+  for (const QByteArray& folderid : Config::get()->listFolders()) deinitFolder(folderid);
+
+  deinitDiscovery();
+
+  peerserver_->stop();
 }
 
 void Client::restart() {
-	qInfo() << "Restarting...";
-	this->exit(EXIT_RESTART);
+  deinitializeAll();
+  qCInfo(log_client) << "Restarting...";
+  this->exit(EXIT_RESTART);
 }
 
-void Client::shutdown(){
-	qInfo() << "Exiting...";
-	this->exit();
+void Client::shutdown() {
+  deinitializeAll();
+  qCInfo(log_client) << "Exiting...";
+  this->exit();
 }
 
-} /* namespace librevault */
+void Client::initDiscovery() {
+  QByteArray discovery_id = node_key_->digest();
+
+  // Multicast
+  mcast_ = new MulticastProvider(this);
+  mcast_->setGroupEndpoint({QHostAddress("239.192.152.144"), 28914});
+  mcast_->setEnabled(Config::get()->getGlobals()["multicast_enabled"].toBool());
+
+  // DHT
+  dht_ = new DHTProvider(this);
+  dht_->setEnabled(Config::get()->getGlobals()["mainline_dht_enabled"].toBool());
+  dht_->addRouter("router.utorrent.com", 6881);
+  dht_->addRouter("router.bittorrent.com", 6881);
+  dht_->addRouter("dht.transmissionbt.com", 6881);
+  dht_->addRouter("dht.aelitis.com", 6881);
+  dht_->addRouter("dht.libtorrent.org", 25401);
+
+  // BitTorrent
+  bt_ = new BTProvider(this);
+  bt_->setEnabled(Config::get()->getGlobals()["bttracker_enabled"].toBool());
+  bt_->setIDPrefix(Config::get()->getGlobals()["bttracker_azureus_id"].toString().toLatin1());
+
+  // common
+  mcast_->setAnnouncePort(peerserver_->externalPort());
+  dht_->setAnnouncePort(peerserver_->externalPort());
+  bt_->setAnnouncePort(peerserver_->externalPort());
+
+  connect(peerserver_, &PeerServer::externalPortChanged, mcast_, &GenericProvider::setAnnouncePort);
+  connect(peerserver_, &PeerServer::externalPortChanged, dht_, &GenericProvider::setAnnouncePort);
+  connect(peerserver_, &PeerServer::externalPortChanged, bt_, &GenericProvider::setAnnouncePort);
+}
+
+void Client::deinitDiscovery() {
+  delete bt_;
+  delete dht_;
+  delete mcast_;
+}
+
+void Client::initFolder(const models::FolderSettings& params) {
+  auto fgroup = new FolderGroup(params, this);
+  groups_[params.folderid()] = fgroup;
+
+  auto peer_pool = new PeerPool(params, node_key_, bt_, dht_, mcast_, this);
+  fgroup->setPeerPool(peer_pool);
+  peerserver_->addPeerPool(params.folderid(), peer_pool);
+
+  qCInfo(log_client) << "Folder initialized:" << params.path << "as" << params.folderid().toHex();
+}
+
+void Client::deinitFolder(const QByteArray& folderid) {
+  auto fgroup = groups_[folderid];
+  groups_.remove(folderid);
+
+  fgroup->deleteLater();
+  qCInfo(log_client) << "Folder deinitialized:" << folderid.toHex();
+}
+
+}  // namespace librevault

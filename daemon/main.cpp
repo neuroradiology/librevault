@@ -27,19 +27,22 @@
  * files in the program, then also delete it here.
  */
 #include "Client.h"
+#include "secret/Secret.h"
 #include "Version.h"
 #include "control/Config.h"
 #include "control/Paths.h"
 #include <docopt.h>
-#include <librevault/Secret.h>
 #include <spdlog/spdlog.h>
+#include <QDocopt.hpp>
 #include <boost/filesystem/path.hpp>
 
-using namespace librevault;	// This is allowed only because this is main.cpp file and it is extremely unlikely that this file will be included in any other file.
+using namespace librevault;  // This is allowed only because this is main.cpp file and it is
+                             // extremely unlikely that this file will be included in any other
+                             // file.
 
 ///////////////////////////////////////////////////////////////////////80 chars/
 static const char* USAGE =
-R"(Librevault synchronization daemon.
+    R"(Librevault synchronization daemon.
 
 Librevault is an open source peer-to-peer file synchronization solution with
 an optional centralized cloud storage, that can be used as a traditional cloud
@@ -59,96 +62,90 @@ Options:
   --version               show version
 )";
 
-void spdlogMessageHandler(QtMsgType msg_type, const QMessageLogContext& ctx, const QString& msg) {
-	auto logger = spdlog::get(Version::current().name().toStdString());
-	if(!logger) return;
+static const char* BANNER =
+    R"(   __    __ _                                _ __ )" "\n"
+    R"(  / /   /_/ /_  ____ _____ _  __ ___  __  __/ / /_)" "\n"
+    R"( / /   __/ /_ \/ ___/ ___/ / / / __ \/ / / / / __/)" "\n"
+    R"(/ /___/ / /_/ / /  / ___/\ \/ / /_/ / /_/ / / /___)" "\n"
+    R"(\____/_/\____/_/  /____/  \__/_/ /_/\____/_/\____/)";
 
-	switch(msg_type) {
-		case QtDebugMsg:
-			logger->debug() << ctx.category << " | " << msg.toStdString();
-			break;
-		case QtWarningMsg:
-			logger->warn() << ctx.category << " | " << msg.toStdString();
-			break;
-		case QtCriticalMsg:
-			logger->critical() << ctx.category << " | " << msg.toStdString();
-			break;
-		case QtFatalMsg:
-			logger->emerg() << ctx.category << " | " << msg.toStdString();
-			logger->flush();
-			abort();
-		case QtInfoMsg:
-			logger->info() << ctx.category << " | " << msg.toStdString();
-			break;
-		default:
-			logger->info() << ctx.category << " | " << msg.toStdString();
-	}
+void spdlogMessageHandler(QtMsgType msg_type, const QMessageLogContext& ctx, const QString& msg) {
+  auto logger = spdlog::get(Version::current().name().toStdString());
+  if (!logger) return;
+
+  switch (msg_type) {
+    case QtDebugMsg: logger->debug(std::string(ctx.category) + " | " + msg.toStdString()); break;
+    case QtWarningMsg: logger->warn(std::string(ctx.category) + " | " + msg.toStdString()); break;
+    case QtCriticalMsg: logger->error(std::string(ctx.category) + " | " + msg.toStdString()); break;
+    case QtFatalMsg:
+      logger->critical(std::string(ctx.category) + " | " + msg.toStdString());
+      logger->flush();
+      abort();
+    case QtInfoMsg: logger->info(std::string(ctx.category) + " | " + msg.toStdString()); break;
+    default: logger->info(std::string(ctx.category) + " | " + msg.toStdString());
+  }
 }
 
 int main(int argc, char** argv) {
-	do {
-		// Argument parsing
-		auto args = docopt::docopt(USAGE, {argv + 1, argv + argc}, true, librevault::Version().version_string().toStdString());
+  QCoreApplication::setApplicationName("Librevault");
+  QCoreApplication::setOrganizationDomain("librevault.com");
 
-		// Initializing paths
-		QString appdata_path;
-		if(args["--data"].isString())
-			appdata_path = QString::fromStdString(args["--data"].asString());
-		Paths::get(appdata_path);
+  // Argument parsing
+  QVariantHash args = qdocopt(USAGE, argc, argv, true, librevault::Version().versionString());
 
-		// Initializing log
-		spdlog::level::level_enum log_level;
-		switch(args["-v"].asLong()) {
-			case 2:     log_level = spdlog::level::trace; break;
-			case 1:     log_level = spdlog::level::debug; break;
-			default:    log_level = spdlog::level::info;
-		}
+  // Initializing log verbosity
+  spdlog::level::level_enum log_level;
+  switch (args["-v"].toLongLong()) {
+    case 2: log_level = spdlog::level::trace; break;
+    case 1: log_level = spdlog::level::debug; break;
+    default: log_level = spdlog::level::info;
+  }
 
-		auto log = spdlog::get(Version::current().name().toStdString());
-		if(!log){
-			std::vector<spdlog::sink_ptr> sinks;
-			sinks.push_back(std::make_shared<spdlog::sinks::stderr_sink_mt>());
+  // Initializing paths
+  QString appdata_path;
+  if (args.contains("--data")) appdata_path = args["--data"].toString();
+  Paths::get(appdata_path);
 
-			boost::filesystem::path log_path = Paths::get()->log_path.toStdWString();
-			sinks.push_back(std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-				(log_path.parent_path() / log_path.stem()).native(), // TODO: support filenames with multiple dots
-				log_path.extension().native().substr(1), 10 * 1024 * 1024, 9));
+  do {
+    // Initializing log
+    auto log = spdlog::get(Version::current().name().toStdString());
+    if (!log) {
+      std::vector<spdlog::sink_ptr> sinks;
+      sinks.push_back(std::make_shared<spdlog::sinks::stderr_sink_mt>());
 
-			log = std::make_shared<spdlog::logger>(Version::current().name().toStdString(), sinks.begin(), sinks.end());
-			spdlog::register_logger(log);
+      boost::filesystem::path log_path = Paths::get()->log_path.toStdWString();
+      sinks.push_back(std::make_shared<spdlog::sinks::simple_file_sink_mt>(log_path.native()));
 
-			log->set_level(log_level);
-			log->set_pattern("%Y-%m-%d %T.%f %t %L | %v");
-			log->flush_on(spdlog::level::warn);
-		}
+      log = std::make_shared<spdlog::logger>(
+          Version::current().name().toStdString(), sinks.begin(), sinks.end());
+      spdlog::register_logger(log);
 
-		// This overrides default Qt behavior, which is fine in many cases;
-		qInstallMessageHandler(spdlogMessageHandler);
+      log->set_level(log_level);
+      log->set_pattern("%Y-%m-%d %T.%f %t %L | %v");
+    }
 
-		// Initializing config
-		Config::get();
+    // This overrides default Qt behavior, which is fine in many cases;
+    qInstallMessageHandler(spdlogMessageHandler);
 
-		// Okay, that's a bit of fun, actually.
-		std::cout
-			<< R"(   __    __ _                                _ __ )" << std::endl
-			<< R"(  / /   /_/ /_  ____ _____ _  __ ___  __  __/ / /_)" << std::endl
-			<< R"( / /   __/ /_ \/ ___/ ___/ / / / __ \/ / / / / __/)" << std::endl
-			<< R"(/ /___/ / /_/ / /  / ___/\ \/ / /_/ / /_/ / / /___)" << std::endl
-			<< R"(\____/_/\____/_/  /____/  \__/_/ /_/\____/_/\____/)" << std::endl;
-		log->info() << Version::current().name().toStdString() << " " << Version::current().version_string().toStdString();
+    std::cout << BANNER << std::endl;  // Print banner string.
+    log->info(Version::current().name().toStdString() + " " +
+        Version::current().versionString().toStdString());
 
-		// And, run!
-		auto client = std::make_unique<Client>(argc, argv);
-		int ret = client->run();
-		client.reset();
+    // Initializing config
+    Config::get();
 
-		// Deinitialization
-		log->flush();
-		Config::deinit();
-		Paths::deinit();
+    // And, run!
+    auto client = std::make_unique<Client>(argc, argv);
+    int ret = client->exec();
+    client.reset();
 
-		if(ret != EXIT_RESTART) return ret;
-	}while(true);
+    // Deinitialization
+    log->flush();
+    Config::deinit();
+    Paths::deinit();
 
-	return 0;
+    if (ret != EXIT_RESTART) return ret;
+  } while (true);
+
+  return 0;
 }

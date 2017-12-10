@@ -27,6 +27,8 @@
  * files in the program, then also delete it here.
  */
 #pragma once
+
+#include "config/FolderSettings_fwd.h"
 #include <QList>
 #include <boost/bimap.hpp>
 #include <boost/bimap/multiset_of.hpp>
@@ -42,8 +44,7 @@ inline std::size_t hash_value(const QByteArray& val) {
 
 namespace librevault {
 
-class FolderParams;
-class MetaStorage;
+class Storage;
 class ChunkStorage;
 
 class WeightedChunkQueue {
@@ -52,7 +53,7 @@ class WeightedChunkQueue {
 		bool immediate = false;
 
 		int owned_by = 0;
-		int remotes_count = 0;
+		int peer_count = 0;
 
 		float value() const;
 		bool operator<(const Weight& b) const {return value() > b.value();}
@@ -74,8 +75,8 @@ public:
 	void addChunk(QByteArray chunk);
 	void removeChunk(QByteArray chunk);
 
-	void setRemotesCount(int count);
-	void setRemotesCount(QByteArray chunk, int count);
+	void setPeerCount(int count);
+	void setPeerCount(QByteArray chunk, int count);
 
 	void markClustered(QByteArray chunk);
 	void markImmediate(QByteArray chunk);

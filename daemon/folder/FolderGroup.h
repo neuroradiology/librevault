@@ -27,95 +27,76 @@
  * files in the program, then also delete it here.
  */
 #pragma once
-#include "control/FolderParams.h"
-#include "p2p/BandwidthCounter.h"
-#include "blob.h"
-#include <librevault/Secret.h>
-#include <librevault/SignedMeta.h>
-#include <librevault/util/conv_bitfield.h>
+#include "secret/Secret.h"
+#include "SignedMeta.h"
+#include "config/FolderSettings.h"
+#include "util/BandwidthCounter.h"
+#include <QLoggingCategory>
 #include <QObject>
-#include <QTimer>
-#include <QSet>
-#include <set>
-#include <QHostAddress>
+#include <memory>
 
 namespace librevault {
 
-class RemoteFolder;
-class FSFolder;
-class P2PFolder;
+Q_DECLARE_LOGGING_CATEGORY(log_folder);
 
-class PathNormalizer;
+class Peer;
+
 class IgnoreList;
-class StateCollector;
 
+class MetaTaskScheduler;
+class Index;
 class ChunkStorage;
-class MetaStorage;
+class DirectoryPoller;
+class DirectoryWatcher;
 
 class MetaUploader;
 class MetaDownloader;
 class Uploader;
 class Downloader;
 
+class PeerPool;
+class NodeKey;
+
 class FolderGroup : public QObject {
-	Q_OBJECT
-	friend class ControlServer;
+  Q_OBJECT
 
-signals:
-	void attached(P2PFolder* remote_ptr);
-	void detached(P2PFolder* remote_ptr);
+ public:
+  FolderGroup(models::FolderSettings params, QObject* parent);
+  virtual ~FolderGroup();
 
-public:
-	FolderGroup(FolderParams params, StateCollector* state_collector, QObject* parent);
-	virtual ~FolderGroup();
+  const models::FolderSettings& params() const { return params_; }
 
-	/* Membership management */
-	bool attach(P2PFolder* remote);
-	void detach(P2PFolder* remote);
+  void setPeerPool(PeerPool* pool);
 
-	/* Getters */
-	QList<RemoteFolder*> remotes() const;
+ private:
+  const models::FolderSettings params_;
 
-	inline const FolderParams& params() const {return params_;}
+  // Local storage
+  IgnoreList* ignore_list_ = nullptr;
+  MetaTaskScheduler* task_scheduler_ = nullptr;
+  Index* index_ = nullptr;
+  ChunkStorage* chunk_storage_ = nullptr;
+  DirectoryPoller* poller_ = nullptr;
+  DirectoryWatcher* watcher_ = nullptr;
 
-	inline const Secret& secret() const {return params().secret;}
-	QByteArray folderid() const {return conv_bytearray(secret().get_Hash());}
+  // P2P transfers
+  PeerPool* pool_ = nullptr;
+  Uploader* uploader_ = nullptr;
+  Downloader* downloader_ = nullptr;
+  MetaUploader* meta_uploader_ = nullptr;
+  MetaDownloader* meta_downloader_ = nullptr;
 
-	BandwidthCounter& bandwidth_counter() {return bandwidth_counter_;}
+ private slots:
+  // void handleAddedChunk(const QByteArray& ct_hash);
+  void addIndexing(const QString& abspath);
+  void addAssemble(SignedMeta smeta);
 
-	QString log_tag() const;
+  void notifyLocalMeta(const SignedMeta& smeta);
+  void handleNewChunk(const QByteArray& ct_hash);
+  void handleNewPeer(Peer* peer);
 
-private:
-	const FolderParams params_;
-	StateCollector* state_collector_;
-
-	std::unique_ptr<PathNormalizer> path_normalizer_;
-	std::unique_ptr<IgnoreList> ignore_list;
-
-	ChunkStorage* chunk_storage_;
-	MetaStorage* meta_storage_;
-
-	Uploader* uploader_;
-	Downloader* downloader_;
-	MetaUploader* meta_uploader_;
-	MetaDownloader* meta_downloader_;
-
-	BandwidthCounter bandwidth_counter_;
-
-	QTimer* state_pusher_;
-
-	/* Members */
-	QSet<RemoteFolder*> remotes_;
-	QSet<RemoteFolder*> remotes_ready_;
-
-	// Member lookup optimization
-	QSet<QByteArray> p2p_folders_digests_;
-	QSet<QPair<QHostAddress, quint16>> p2p_folders_endpoints_;
-
-private slots:
-	void push_state();
-	void handle_indexed_meta(const SignedMeta& smeta);
-	void handle_handshake(RemoteFolder* origin);
+ private:
+  void createServiceDirectory();
 };
 
 } /* namespace librevault */

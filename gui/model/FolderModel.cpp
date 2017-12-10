@@ -31,8 +31,8 @@
 #include "control/Daemon.h"
 #include "control/RemoteConfig.h"
 #include "control/RemoteState.h"
-#include "human_size.h"
-#include <librevault/Secret.h>
+#include "util/human_size.h"
+#include "secret/Secret.h"
 #include <QFileIconProvider>
 
 FolderModel::FolderModel(Daemon* daemon) :
@@ -53,7 +53,7 @@ QVariant FolderModel::data(const QModelIndex &index, int role) const {
 
 	if(role == Qt::DisplayRole) {
 		switch(column) {
-			case Column::NAME: return daemon_->config()->getFolderValue(folderid, "path").toString();
+			case Column::NAME: return daemon_->config()->getFolder(folderid).value("path").toString();
 			case Column::STATUS: return [&, this]{
 					if(daemon_->state()->getFolderValue(folderid, "is_indexing").toBool())
 						return tr("Indexing");

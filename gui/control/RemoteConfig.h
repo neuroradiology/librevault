@@ -28,7 +28,7 @@
  */
 #pragma once
 #include "GenericRemoteDictionary.h"
-#include "AbstractConfig.h"
+#include "config/AbstractConfig.h"
 #include <QJsonValue>
 
 class Daemon;
@@ -41,32 +41,25 @@ signals:
 
 public:
 	explicit RemoteConfig(Daemon* daemon);
-	virtual ~RemoteConfig() {}
 
 public slots:
 	/* Global configuration */
-	QVariant getGlobal(QString name) override;
-	void setGlobal(QString name, QVariant value) override;
-	void removeGlobal(QString name) override;
+	QJsonObject getGlobals() override;
+	void setGlobal(QString name, QVariant value);
 
 	/* Folder configuration */
-	void addFolder(QVariantMap fconfig) override;
+	void addFolder(QJsonObject fconfig) override;
 	void removeFolder(QByteArray folderid) override;
 
-	QVariantMap getFolder(QByteArray folderid) override;
+	QJsonObject getFolder(QByteArray folderid) override;
 	QList<QByteArray> listFolders() override;
 
 	/* Export/Import */
-	QJsonDocument exportUserGlobals() override;
 	QJsonDocument exportGlobals() override;
-	void importGlobals(QJsonDocument globals_conf) override;
-
-	QJsonDocument exportUserFolders() override;
 	QJsonDocument exportFolders() override;
-	void importFolders(QJsonDocument folders_conf) override;
 
 private:
-	QVariantMap cached_globals_;
+	QJsonObject cached_globals_;
 	QMap<QByteArray, QVariantMap> cached_folders_;
 
 	Daemon* daemon_;

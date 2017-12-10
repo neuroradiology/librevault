@@ -27,34 +27,37 @@
  * files in the program, then also delete it here.
  */
 #pragma once
-#include "util/log.h"
-#include "blob.h"
+#include "p2p/Peer.h"
 #include <QObject>
-#include <set>
 
 namespace librevault {
 
-class RemoteFolder;
+class Peer;
 class ChunkStorage;
 
 class Uploader : public QObject {
-	Q_OBJECT
-	LOG_SCOPE("Uploader");
-public:
-	Uploader(ChunkStorage* chunk_storage, QObject* parent);
+  Q_OBJECT
 
-	void broadcast_chunk(QList<RemoteFolder*> remotes, const blob& ct_hash);
+ public:
+  DECLARE_EXCEPTION(ChokeMismatch, "Peer is choked or not interested");
+  DECLARE_EXCEPTION(BlockOutOfBounds, "Requested offset or length is out of bounds");
 
-	/* Message handlers */
-	void handle_interested(RemoteFolder* remote);
-	void handle_not_interested(RemoteFolder* remote);
+  Uploader(ChunkStorage* chunk_storage, QObject* parent);
 
-	void handle_block_request(RemoteFolder* remote, const blob& ct_hash, uint32_t offset, uint32_t size) noexcept;
+  /* Message handlers */
+  void handleInterested(Peer* peer);
+  void handleNotInterested(Peer* peer);
 
-private:
-	ChunkStorage* chunk_storage_;
+  void untrackPeer(Peer* peer);
 
-	blob get_block(const blob& ct_hash, uint32_t offset, uint32_t size);
+  void handleBlockRequest(
+      Peer* peer, const QByteArray& ct_hash, quint32 offset, quint32 size) noexcept;
+
+ private:
+  ChunkStorage* chunk_storage_;
+  QHash<Peer*, std::shared_ptr<StateGuard>> all_interested_;
+
+  QByteArray getBlock(const QByteArray& ct_hash, quint32 offset, quint32 size);
 };
 
 } /* namespace librevault */

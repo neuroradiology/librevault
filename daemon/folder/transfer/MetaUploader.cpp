@@ -27,36 +27,55 @@
  * files in the program, then also delete it here.
  */
 #include "MetaUploader.h"
-#include "folder/chunk/ChunkStorage.h"
-#include "folder/meta/MetaStorage.h"
-#include "folder/RemoteFolder.h"
+#include "folder/storage/ChunkStorage.h"
+#include "folder/storage/Index.h"
+#include "p2p/Peer.h"
+#include <QLoggingCategory>
+#include <ChunkInfo.h>
 
 namespace librevault {
 
-MetaUploader::MetaUploader(MetaStorage* meta_storage, ChunkStorage* chunk_storage, QObject* parent) :
-	QObject(parent),
-	meta_storage_(meta_storage), chunk_storage_(chunk_storage) {
-	LOGFUNC();
+Q_LOGGING_CATEGORY(log_metauploader, "folder.transfer.metauploader")
+
+MetaUploader::MetaUploader(Index* index, ChunkStorage* chunk_storage, QObject* parent)
+    : QObject(parent), index_(index), chunk_storage_(chunk_storage) {}
+
+void MetaUploader::broadcastMeta(const QList<Peer*>& peers, const SignedMeta& smeta) {
+  for (auto peer : peers) peer->send(makeMessage(smeta));
 }
 
-void MetaUploader::broadcast_meta(QList<RemoteFolder*> remotes, const Meta::PathRevision& revision, const bitfield_type& bitfield) {
-	for(auto remote : remotes) {
-		remote->post_have_meta(revision, bitfield);
-	}
+void MetaUploader::broadcastChunk(const QList<Peer*>& peers, const QByteArray& ct_hash) {
+  for (const auto& smeta : index_->containingChunk(ct_hash))
+    for (auto peer : peers) peer->send(makeMessage(smeta));
 }
 
-void MetaUploader::handle_handshake(RemoteFolder* remote) {
-	for(auto& meta : meta_storage_->getMeta()) {
-		remote->post_have_meta(meta.meta().path_revision(), chunk_storage_->make_bitfield(meta.meta()));
-	}
+void MetaUploader::handleHandshake(Peer* peer) {
+  for (auto& smeta : index_->getMeta()) peer->send(makeMessage(smeta));
 }
 
-void MetaUploader::handle_meta_request(RemoteFolder* remote, const Meta::PathRevision& revision) {
-	try {
-		remote->post_meta(meta_storage_->getMeta(revision), chunk_storage_->make_bitfield(meta_storage_->getMeta(revision).meta()));
-	}catch(MetaStorage::no_such_meta& e){
-		LOGW("Requested nonexistent Meta");
-	}
+void MetaUploader::handleMetaRequest(Peer* peer, const MetaInfo::PathRevision& revision) {
+  try {
+    protocol::v2::Message response;
+    response.header.type = protocol::v2::MessageType::METARESPONSE;
+    response.metaresponse.smeta = index_->getMeta(revision);
+    response.metaresponse.bitfield = chunk_storage_->makeBitfield(response.metaresponse.smeta.metaInfo());
+    peer->send(response);
+  } catch (const Index::NoSuchMeta& e) {
+    qCDebug(log_metauploader) << "Requested nonexistent Meta";
+  } catch (const std::exception& e) {
+    qCDebug(log_metauploader) << "Unexpected error:" << e.what();
+  }
+}
+
+protocol::v2::Message MetaUploader::makeMessage(const SignedMeta& smeta) {
+  protocol::v2::Message update;
+  update.header.type = protocol::v2::MessageType::INDEXUPDATE;
+  update.indexupdate.revision = smeta.metaInfo().path_revision();
+  update.indexupdate.bitfield = chunk_storage_->makeBitfield(smeta.metaInfo());
+
+  Q_ASSERT(update.indexupdate.bitfield.size() == smeta.metaInfo().chunks().size());
+
+  return update;
 }
 
 } /* namespace librevault */

@@ -27,30 +27,38 @@
  * files in the program, then also delete it here.
  */
 #pragma once
-#include "util/log.h"
-#include <librevault/SignedMeta.h>
-#include <librevault/util/conv_bitfield.h>
+#include "SignedMeta.h"
+#include "config/FolderSettings.h"
+#include <QBitArray>
 #include <QObject>
 
 namespace librevault {
 
-class RemoteFolder;
-class MetaStorage;
+class Peer;
+class Index;
 class Downloader;
+class MetaTaskScheduler;
 
 class MetaDownloader : public QObject {
-	Q_OBJECT
-	LOG_SCOPE("MetaDownloader");
-public:
-	MetaDownloader(MetaStorage* meta_storage, Downloader* downloader, QObject* parent);
+  Q_OBJECT
 
-	/* Message handlers */
-	void handle_have_meta(RemoteFolder* origin, const Meta::PathRevision& revision, const bitfield_type& bitfield);
-	void handle_meta_reply(RemoteFolder* origin, const SignedMeta& smeta, const bitfield_type& bitfield);
+ public:
+  MetaDownloader(const models::FolderSettings& params, Index* index, Downloader* downloader,
+      MetaTaskScheduler* task_scheduler, QObject* parent);
 
-private:
-	MetaStorage* meta_storage_;
-	Downloader* downloader_;
+  DECLARE_EXCEPTION(CantDownload, "Meta is forbidden for download");
+  DECLARE_EXCEPTION_DETAIL(InvalidSignature, CantDownload, "Meta signature is invalid");
+  DECLARE_EXCEPTION_DETAIL(OldMeta, CantDownload, "Remote node notified us about an older Meta than ours");
+
+  /* Message handlers */
+  void handleIndexUpdate(Peer* peer, const MetaInfo::PathRevision& revision, QBitArray bitfield);
+  void handleMetaReply(Peer* peer, const SignedMeta& smeta, QBitArray bitfield);
+
+ private:
+  const models::FolderSettings& params_;
+  Index* index_;
+  Downloader* downloader_;
+  MetaTaskScheduler* task_scheduler_;
 };
 
 } /* namespace librevault */
